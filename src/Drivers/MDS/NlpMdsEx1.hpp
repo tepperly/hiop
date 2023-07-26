@@ -15,6 +15,7 @@
 #define MPI_Comm int
 #endif
 
+#include <memory>
 #include <cassert>
 #include <cstring> //for memcpy
 #include <cstdio>
@@ -62,7 +63,7 @@ public:
   }
   
   MdsEx1(int ns_, int nd_, bool empty_sp_row = false)
-    : ns(ns_), sol_x_(NULL), sol_zl_(NULL), sol_zu_(NULL), sol_lambda_(NULL), empty_sp_row_(empty_sp_row)
+    : ns(ns_), empty_sp_row_(empty_sp_row)
   {
     if(ns<0) {
       ns = 0;
@@ -76,7 +77,7 @@ public:
     if(nd_<0) nd=0;
     else nd = nd_;
 
-    Q  = hiop::LinearAlgebraFactory::create_matrix_dense("DEFAULT", nd, nd);
+    Q.reset(hiop::LinearAlgebraFactory::create_matrix_dense("DEFAULT", nd, nd));
     Q->setToConstant(1e-8);
     Q->addDiagonal(2.);
     double* Qa = Q->local_data();
@@ -87,23 +88,16 @@ public:
       Qa[(i+1)*nd+i] = 1.;
     }
 
-    Md = hiop::LinearAlgebraFactory::create_matrix_dense("DEFAULT", ns, nd);
+    Md.reset(hiop::LinearAlgebraFactory::create_matrix_dense("DEFAULT", ns, nd));
     Md->setToConstant(-1.0);
 
-    _buf_y = new double[nd];
+    _buf_y = std::make_unique<double[]>(nd);
 
     haveIneq = true;
   }
 
   virtual ~MdsEx1()
   {
-    delete[] _buf_y;
-    delete Md;
-    delete Q;
-    delete[] sol_lambda_;
-    delete[] sol_zu_;
-    delete[] sol_zl_;
-    delete[] sol_x_;
   }
   
   bool get_prob_sizes(size_type& n, size_type& m)
@@ -190,7 +184,7 @@ public:
 
     double term2=0.;
     const double* y = x+2*ns;
-    Q->timesVec(0.0, _buf_y, 1., y);
+    Q->timesVec(0.0, _buf_y.get(), 1., y);
     for(int i=0; i<nd; i++) term2 += _buf_y[i] * y[i];
     obj_value += 0.5*term2;
     
@@ -460,10 +454,10 @@ public:
 
       duals_avail = true;
     
-      memcpy(x0, sol_x_, n*sizeof(double));
-      memcpy(z_bndL0, sol_zl_, n*sizeof(double));
-      memcpy(z_bndU0, sol_zu_, n*sizeof(double));
-      memcpy(lambda0, sol_lambda_, m*sizeof(double));
+      memcpy(x0, sol_x_.get(), n*sizeof(double));
+      memcpy(z_bndL0, sol_zl_.get(), n*sizeof(double));
+      memcpy(z_bndU0, sol_zu_.get(), n*sizeof(double));
+      memcpy(lambda0, sol_lambda_.get(), m*sizeof(double));
 
     } else {
       duals_avail = false;
@@ -481,29 +475,29 @@ public:
   void set_solution_primal(const double* x)
   {
     int n=2*ns+nd;
-    if(NULL == sol_x_) {
-      sol_x_ = new double[n];
+    if(nullptr == sol_x_) {
+      sol_x_ = std::make_unique<double[]>(n);
     }
-    memcpy(sol_x_, x, n*sizeof(double));
+    memcpy(sol_x_.get(), x, n*sizeof(double));
   }
   void set_solution_duals(const double* zl, const double* zu, const double* lambda)
   {
     int m=ns+3*haveIneq;
     int n=2*ns+nd;
-    if(NULL == sol_zl_) {
-      sol_zl_ = new double[n];
+    if(nullptr == sol_zl_) {
+      sol_zl_ = std::make_unique<double[]>(n);
     }
-    memcpy(sol_zl_, zl, n*sizeof(double));
+    memcpy(sol_zl_.get(), zl, n*sizeof(double));
     
-    if(NULL == sol_zu_) {
-      sol_zu_ = new double[n];
+    if(nullptr == sol_zu_) {
+      sol_zu_ = std::make_unique<double[]>(n);
     }
-    memcpy(sol_zu_, zu, n*sizeof(double));
+    memcpy(sol_zu_.get(), zu, n*sizeof(double));
 
-    if(NULL == sol_lambda_) {
-      sol_lambda_ = new double[m];
+    if(nullptr == sol_lambda_) {
+      sol_lambda_ = std::make_unique<double[]>(m);
     }
-    memcpy(sol_lambda_, lambda, m*sizeof(double));
+    memcpy(sol_lambda_.get(), lambda, m*sizeof(double));
   }
 
   /** pass the COMM_SELF communicator since this example is only intended to run inside 1 MPI process */
@@ -511,15 +505,15 @@ public:
 
 protected:
   int ns, nd;
-  hiop::hiopMatrixDense *Q, *Md;
-  double* _buf_y;
+  std::unique_ptr<hiop::hiopMatrixDense> Q, Md;
+  std::unique_ptr<double[]> _buf_y;
   bool haveIneq;
 
   /* Internal buffers to store primal-dual solution */
-  double* sol_x_;
-  double* sol_zl_;
-  double* sol_zu_;
-  double* sol_lambda_;
+  std::unique_ptr<double[]> sol_x_;
+  std::unique_ptr<double[]> sol_zl_;
+  std::unique_ptr<double[]> sol_zu_;
+  std::unique_ptr<double[]> sol_lambda_;
 
   /* indicate if problem has empty row in constraint Jacobian */
   bool empty_sp_row_;
